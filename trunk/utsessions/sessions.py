@@ -23,7 +23,7 @@ class SessionCollector(object):
         self.flush()
         return len(self._sessions)
 
-    def flush(self):
+    def flush(self, session_limit=SESSION_LIMIT_SECONDS):
         """Flush the cache of opened sessions and
         close expired session"""
         now = datetime.now()
@@ -31,32 +31,36 @@ class SessionCollector(object):
         for session_key, values in self._sessions.items():
             creation_time, request = values
             delta = now - creation_time
-            if SESSION_LIMIT_SECONDS and delta.seconds > SESSION_LIMIT_SECONDS:
+            if session_limit and delta.seconds >= session_limit:
                 logout(request)
             if not request.session.exists(session_key):
                 del self._sessions[session_key]
 
     def set_unique(self):
         """Choose the current session, and close the others"""
-        current_session_key = self.get_current_session_key(user_key)
+        current_session_key = self.get_current_session_key()
 
         for session_key, values in self._sessions.items():
-            if session_key != most_recent_session_key:
+            if session_key != current_session_key:
                 creation_time, request = values
                 logout(request)
+                del self._sessions[session_key]
 
-    def get_current_session_key(self):
+    def get_current_session_key(self, session_token_limit=SESSION_TOKEN_LIMIT_SECONDS):
         """Return the current session key, selected by his creation time
-        and his limit before destruction"""
-        most_recent = 0
-        most_recent_key = ''
+        and his limit before destruction, we suppose that we always
+        have 2 items in sessions"""
+        sessions = self._sessions.items()[:2]
 
-        for session_key, values in self._sessions.items():
-            creation_time, request = values
-            if creation_time.second > most_recent:
-                if not SESSION_TOKEN_LIMIT_SECOND:
-                    most_recent, most_recent_key = creation_time.second, session_key
-                elif datetime_opened.second >= SESSION_TOKEN_LIMIT_SECONDS:
-                    most_recent, most_recent_key = creation_time.second, session_key
+        if sessions[0][1][0] > sessions[1][1][0]:
+            most_recent_session = sessions[0]
+            most_oldest_session = sessions[1]
+        else:
+            most_recent_session = sessions[1]
+            most_oldest_session = sessions[0]
 
-        return most_recent_key
+        delta_oldest = datetime.now() - most_oldest_session[1][0]
+        if session_token_limit and delta_oldest.seconds < session_token_limit:
+            return most_oldest_session[0]
+        return most_recent_session[0]
+
